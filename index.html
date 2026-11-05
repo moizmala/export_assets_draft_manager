@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kontent.ai Asset Manager</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b4d; --muted:#5e6c84; --line:#dfe3e8; --blue:#0065ff; --bg:#f4f6f9; }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:28px; background:var(--bg); color:var(--ink); font:14px/1.45 Arial,sans-serif; }
+    .app { max-width:1400px; margin:auto; }
+    header { margin-bottom:20px; }
+    h1 { margin:0 0 6px; font-size:26px; }
+    .sub { color:var(--muted); }
+    .panel { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px; box-shadow:0 2px 8px #091e4210; }
+    .credentials { display:grid; grid-template-columns:1fr 1fr auto; gap:14px; align-items:end; }
+    label { display:block; font-weight:700; margin-bottom:6px; }
+    input[type=text], input[type=password], input[type=search] { width:100%; border:1px solid #c7ced8; border-radius:6px; padding:10px 12px; font:inherit; min-width:0; }
+    button { border:0; border-radius:6px; padding:10px 14px; font-weight:700; cursor:pointer; background:var(--blue); color:#fff; }
+    button:hover:not(:disabled) { filter:brightness(.93); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .secondary { background:#e9eef5; color:#253858; }
+    .danger { background:#de350b; }
+    .warning { background:#ffab00; color:#172b4d; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:9px; align-items:center; }
+    .toolbar .spacer { flex:1; }
+    .search { width:min(380px,100%); }
+    .status { margin-top:12px; color:var(--muted); min-height:20px; }
+    .status.error { color:#bf2600; }
+    .status.success { color:#006644; }
+    .notice { background:#fff7e6; border:1px solid #ffe0a3; color:#7a4b00; border-radius:7px; padding:12px 14px; margin-top:14px; }
+    .summary { display:flex; gap:18px; flex-wrap:wrap; color:var(--muted); margin:12px 0; }
+    .summary strong { color:var(--ink); }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:8px; }
+    table { width:100%; border-collapse:collapse; background:#fff; min-width:900px; }
+    th,td { text-align:left; padding:11px 12px; border-bottom:1px solid #edf0f3; vertical-align:middle; }
+    th { background:#f7f8fa; position:sticky; top:0; z-index:1; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:#5e6c84; }
+    tr:last-child td { border-bottom:0; }
+    tr.selected { background:#f0f6ff; }
+    td.file { max-width:300px; overflow-wrap:anywhere; font-weight:600; }
+    td.id { font-family:Consolas,monospace; font-size:12px; overflow-wrap:anywhere; }
+    a { color:#0052cc; }
+    .empty { text-align:center; color:var(--muted); padding:28px; }
+    .small { font-size:12px; color:var(--muted); }
+    .check { width:17px; height:17px; cursor:pointer; }
+    @media(max-width:760px) {
+      body { padding:14px; }
+      .credentials { grid-template-columns:1fr; }
+      .toolbar .spacer { display:none; }
+      .search { width:100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Kontent.ai Asset Manager</h1>
+    <div class="sub">Retrieve, search, select, export and manage assets using the Management API v2.</div>
+  </header>
+
+  <section class="panel">
+    <div class="credentials">
+      <div>
+        <label for="envId">Environment ID</label>
+        <input type="text" id="envId" placeholder="Kontent.ai environment ID" autocomplete="off">
+      </div>
+      <div>
+        <label for="bearerToken">Management API key</label>
+        <input type="password" id="bearerToken" placeholder="Bearer token" autocomplete="off">
+      </div>
+      <div><button id="loadButton" type="button">Load assets</button></div>
+    </div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div class="notice">
+      <strong>Asset lifecycle limitation:</strong> The Kontent.ai Management API provides an asset delete endpoint, but assets do not have content-item workflow publishing or archiving actions. Publish and Archive are therefore unavailable for asset search results. To publish or archive content, use the content-item/variant workflow APIs instead.
+    </div>
+  </section>
+
+  <section class="panel tabbar" style="padding:10px">
+    <div class="toolbar">
+      <button id="assetsTab" type="button">Asset Manager</button>
+      <button id="draftsTab" type="button" class="secondary">Draft Content Items</button>
+    </div>
+  </section>
+
+  <div id="assetsPanel">
+  <section class="panel">
+    <div class="toolbar">
+      <input class="search" type="search" id="searchInput" placeholder="Search file name, ID, folder or collection…" disabled>
+      <div class="spacer"></div>
+      <button id="exportButton" class="secondary" type="button" disabled>Export filtered CSV</button>
+    </div>
+    <div class="summary">
+      <span>Loaded: <strong id="loadedCount">0</strong></span>
+      <span>Visible: <strong id="visibleCount">0</strong></span>
+      <span>Selected: <strong id="selectedCount">0</strong></span>
+    </div>
+    <div class="toolbar" style="margin-bottom:12px">
+      <button id="selectVisibleButton" class="secondary" type="button" disabled>Select visible</button>
+      <button id="clearSelectionButton" class="secondary" type="button" disabled>Clear selection</button>
+      <div class="spacer"></div>
+      <button id="deleteButton" class="danger" type="button" disabled>Delete selected</button>
+      <button id="publishButton" class="secondary" type="button" disabled title="Not supported for assets by the Kontent.ai Management API">Publish selected</button>
+      <button id="archiveButton" class="secondary" type="button" disabled title="Not supported for assets by the Kontent.ai Management API">Archive selected</button>
+    </div>
+    <div class="small" style="margin-bottom:10px">Deletion is permanent. Kontent.ai only allows deleting assets that are not in use. The operation is sent one asset at a time.</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:42px"><input class="check" type="checkbox" id="selectAll" aria-label="Select all visible assets" disabled></th>
+            <th>File name</th><th>Asset ID</th><th>Size</th><th>Folder ID</th><th>Collection</th><th>Last modified</th><th>Asset URL</th>
+          </tr>
+        </thead>
+        <tbody id="assetRows"><tr><td colspan="8" class="empty">Load assets to view search results.</td></tr></tbody>
+      </table>
+    </div>
+    <div id="actionResults" class="status" aria-live="polite"></div>
+  </section>
+  </div>
+
+  <div id="draftsPanel" hidden>
+    <section class="panel">
+      <div class="toolbar">
+        <div><strong>Draft content variants</strong><div class="small">Search all language variants currently in the Draft workflow step.</div></div>
+        <div class="spacer"></div>
+        <button id="loadDraftsButton" type="button">Search draft items</button>
+      </div>
+      <div id="draftStatus" class="status" role="status" aria-live="polite">Enter the Environment ID and Management API key above, then search for draft content items.</div>
+      <div class="notice">Results are listed per language variant. Deleting removes only the selected language variant; if it is the item's last variant, Kontent.ai deletes the entire content item. Archiving moves the selected draft variant to the Archived workflow step. Both actions depend on your API key permissions and workflow transition rules.</div>
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <input class="search" type="search" id="draftSearchInput" placeholder="Search name, codename, content type, language…" disabled>
+        <div class="spacer"></div>
+        <button id="draftExportButton" class="secondary" type="button" disabled>Export CSV</button>
+      </div>
+      <div class="summary">
+        <span>Draft variants: <strong id="draftLoadedCount">0</strong></span>
+        <span>Visible: <strong id="draftVisibleCount">0</strong></span>
+        <span>Selected: <strong id="draftSelectedCount">0</strong></span>
+      </div>
+      <div class="toolbar" style="margin-bottom:12px">
+        <button id="draftSelectVisibleButton" class="secondary" type="button" disabled>Select visible</button>
+        <button id="draftClearSelectionButton" class="secondary" type="button" disabled>Clear selection</button>
+        <div class="spacer"></div>
+        <button id="draftDeleteButton" class="danger" type="button" disabled>Delete selected variants</button>
+        <button id="draftArchiveButton" class="warning" type="button" disabled>Archive selected</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:42px"><input class="check" type="checkbox" id="draftSelectAll" aria-label="Select all visible draft variants" disabled></th>
+            <th>Content item</th><th>Codename</th><th>Language</th><th>Content type</th><th>Collection</th><th>Last modified</th><th>Workflow step</th>
+          </tr></thead>
+          <tbody id="draftRows"><tr><td colspan="8" class="empty">Search to list draft content items.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="draftActionResults" class="status" aria-live="polite"></div>
+    </section>
+  </div>
+</div>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+<script src="index.js"></script>
+</body>
+</html>

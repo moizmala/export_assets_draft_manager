@@ -1,0 +1,17 @@
+{
+  "name": "kontent-ai-asset-and-draft-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-based Kontent.ai Management API utility for managing assets and draft content-item variants.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "serve": "node server.js",
+    "build": "node --check index.js && node --check server.js",
+    "check": "node --check index.js && node --check server.js"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
