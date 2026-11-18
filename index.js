@@ -464,14 +464,228 @@
     document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
   };
 
-  $("assetsTab").addEventListener("click", () => {
-    $("assetsPanel").hidden = false; $("draftsPanel").hidden = true;
-    $("assetsTab").className = ""; $("draftsTab").className = "secondary";
-  });
-  $("draftsTab").addEventListener("click", () => {
-    $("assetsPanel").hidden = true; $("draftsPanel").hidden = false;
-    $("assetsTab").className = "secondary"; $("draftsTab").className = "";
-  });
+  // ---------------- template_dining spreadsheet export ----------------
+  const DINING_CONTENT_TYPE = "template_dining";
+  const DINING_DEFAULT_LANGUAGE_ID = "00000000-0000-0000-0000-000000000000";
+  const DINING_COLUMNS = [
+    "name", "code_name", "website", "description", "short_description", "summary",
+    "insider_tips", "city", "country", "hours_of_operation", "image_1_url",
+    "image_2_url", "image_3_url", "source_id", "content_id"
+  ];
+  let diningExportRows = [];
+  let isDiningLoading = false;
+
+  const setDiningStatus = (message, type = "") => {
+    $("diningStatus").textContent = message;
+    $("diningStatus").className = `status ${type}`;
+  };
+
+  const fetchAllPages = async (url, apiKey, arrayProperty, progressLabel) => {
+    const all = [];
+    let continuation = null;
+    const seen = new Set();
+    do {
+      const headers = continuation ? { "x-continuation": continuation } : {};
+      const page = await apiRequest(url, apiKey, { method: "GET", headers });
+      if (!page || !Array.isArray(page[arrayProperty])) {
+        throw new Error(`Unexpected API response: ${arrayProperty} array is missing.`);
+      }
+      all.push(...page[arrayProperty]);
+      const next = page.pagination?.continuation_token || null;
+      if (next && seen.has(next)) throw new Error(`Repeated continuation token while retrieving ${progressLabel}.`);
+      if (next) seen.add(next);
+      continuation = next;
+      setDiningStatus(`Retrieving ${progressLabel}: ${all.length} loaded…`);
+    } while (continuation);
+    return all;
+  };
+
+  const stripHtmlForSpreadsheet = (value) => {
+    if (typeof value !== "string" || !/<[a-z][\s\S]*>/i.test(value)) return value ?? "";
+    const parsed = new DOMParser().parseFromString(value, "text/html");
+    parsed.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+    parsed.querySelectorAll("p,div,li,h1,h2,h3,h4,h5,h6,tr").forEach((node) => {
+      node.append("\n");
+    });
+    return (parsed.body.textContent || "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").trim();
+  };
+
+  const extractAssetIds = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value.map((asset) => {
+      if (typeof asset === "string") return asset;
+      return asset?.id || asset?.codename || asset?.external_id || "";
+    }).filter(Boolean);
+  };
+
+  const valueAsText = (value) => {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    if (Array.isArray(value)) return value.map((part) => valueAsText(part)).filter(Boolean).join(" | ");
+    if (typeof value === "object") {
+      if ("value" in value) return valueAsText(value.value);
+      if (value.codename) return value.codename;
+      if (value.name) return value.name;
+      return "";
+    }
+    return "";
+  };
+
+  const buildDiningRow = (item, variant, elementCodenameById, assetUrlById) => {
+    const valuesByCodename = new Map();
+    (variant.elements || []).forEach((entry) => {
+      const elementId = entry.element?.id;
+      const codename = entry.element?.codename || elementCodenameById.get(elementId);
+      if (codename) valuesByCodename.set(codename, entry.value);
+    });
+
+    const getText = (codename) => stripHtmlForSpreadsheet(valueAsText(valuesByCodename.get(codename)));
+    const getImageUrl = (codename) => {
+      const value = valuesByCodename.get(codename);
+      if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) return value.trim();
+      if (value && !Array.isArray(value) && typeof value === "object" && value.url) return value.url;
+      const refs = Array.isArray(value) ? value : [];
+      return refs.map((ref) => {
+        if (typeof ref === "string" && /^https?:\/\//i.test(ref)) return ref;
+        if (ref && typeof ref === "object" && ref.url) return ref.url;
+        const id = typeof ref === "string" ? ref : (ref?.id || ref?.codename || ref?.external_id);
+        if (!id) return "";
+        const asset = assetUrlById.get(id);
+        return asset?.url || assetUrlById.get(id)?.url || "";
+      }).filter(Boolean).join(" | ");
+    };
+
+    return {
+      name: item.name || "",
+      code_name: item.codename || "",
+      website: getText("website"),
+      description: getText("description"),
+      short_description: getText("short_description"),
+      summary: getText("summary"),
+      insider_tips: getText("insider_tips"),
+      city: getText("city"),
+      country: getText("country"),
+      hours_of_operation: getText("hours_of_operation"),
+      image_1_url: getImageUrl("image_1_url"),
+      image_2_url: getImageUrl("image_2_url"),
+      image_3_url: getImageUrl("image_3_url"),
+      source_id: getText("source_id") || item.external_id || "",
+      content_id: item.id || ""
+    };
+  };
+
+  const renderDiningPreview = () => {
+    $("diningHead").innerHTML = `<tr>${DINING_COLUMNS.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
+    const preview = diningExportRows.slice(0, 25);
+    $("diningCount").textContent = diningExportRows.length;
+    $("diningPreviewCount").textContent = preview.length;
+    if (!preview.length) {
+      $("diningRows").innerHTML = `<tr><td colspan="${DINING_COLUMNS.length}" class="empty">No default-language template_dining items were found.</td></tr>`;
+      return;
+    }
+    $("diningRows").innerHTML = preview.map((row) => `<tr>${DINING_COLUMNS.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("");
+  };
+
+  const extractTemplateDining = async () => {
+    if (isDiningLoading) return;
+    let config;
+    try { config = getConfig(); } catch (error) { setDiningStatus(error.message, "error"); return; }
+    if (!window.XLSX) {
+      setDiningStatus("The Excel library could not be loaded. Check your internet/CDN access and reload the page.", "error");
+      return;
+    }
+
+    isDiningLoading = true;
+    $("extractDiningButton").disabled = true;
+    $("extractDiningButton").textContent = "Extracting…";
+    $("downloadDiningButton").disabled = true;
+    diningExportRows = [];
+    renderDiningPreview();
+
+    const base = `https://manage.kontent.ai/v2/projects/${encodeURIComponent(config.environmentId)}`;
+    try {
+      setDiningStatus(`Retrieving content type ${DINING_CONTENT_TYPE}…`);
+      const contentType = await apiRequest(`${base}/types/codename/${encodeURIComponent(DINING_CONTENT_TYPE)}`, config.apiKey, { method: "GET" });
+      if (!contentType?.id || contentType.codename !== DINING_CONTENT_TYPE) {
+        throw new Error(`Content type '${DINING_CONTENT_TYPE}' was not returned by the Management API.`);
+      }
+      const elementCodenameById = new Map((contentType.elements || []).map((element) => [element.id, element.codename]));
+      const expectedFields = DINING_COLUMNS.filter((field) => !["name", "code_name", "source_id", "content_id"].includes(field));
+      const missingFields = expectedFields.filter((field) => !(contentType.elements || []).some((element) => element.codename === field));
+
+      const items = await fetchAllPages(`${base}/items`, config.apiKey, "items", "content item metadata");
+      const itemById = new Map(items.filter((item) => item.type?.id === contentType.id || item.type?.codename === DINING_CONTENT_TYPE).map((item) => [item.id, item]));
+      if (!itemById.size) {
+        setDiningStatus(`Content type found, but no content items use ${DINING_CONTENT_TYPE}.`, "success");
+        renderDiningPreview();
+        return;
+      }
+
+      const variants = await fetchAllPages(`${base}/types/codename/${encodeURIComponent(DINING_CONTENT_TYPE)}/variants`, config.apiKey, "variants", "template_dining language variants");
+      const defaultVariants = variants.filter((variant) => variant.language?.id === DINING_DEFAULT_LANGUAGE_ID);
+      const referencedItemIds = new Set(defaultVariants.map((variant) => variant.item?.id).filter(Boolean));
+      const referencedAssetIds = new Set();
+      defaultVariants.forEach((variant) => {
+        (variant.elements || []).forEach((entry) => {
+          const codename = entry.element?.codename || elementCodenameById.get(entry.element?.id);
+          if (["image_1_url", "image_2_url", "image_3_url"].includes(codename)) {
+            extractAssetIds(entry.value).forEach((id) => referencedAssetIds.add(id));
+          }
+        });
+      });
+
+      const assetUrlById = new Map();
+      if (referencedAssetIds.size) {
+        const assets = await fetchAllPages(`${base}/assets`, config.apiKey, "assets", "asset URLs");
+        assets.forEach((asset) => {
+          if (asset.id && asset.url) assetUrlById.set(asset.id, { url: asset.url });
+          if (asset.codename && asset.url) assetUrlById.set(asset.codename, { url: asset.url });
+          if (asset.external_id && asset.url) assetUrlById.set(asset.external_id, { url: asset.url });
+        });
+      }
+
+      diningExportRows = defaultVariants
+        .filter((variant) => referencedItemIds.has(variant.item?.id) && itemById.has(variant.item.id))
+        .map((variant) => buildDiningRow(itemById.get(variant.item.id), variant, elementCodenameById, assetUrlById));
+
+      renderDiningPreview();
+      $("downloadDiningButton").disabled = diningExportRows.length === 0;
+      const fieldNote = missingFields.length ? ` Missing content elements (exported blank): ${missingFields.join(", ")}.` : " All requested content elements were found.";
+      setDiningStatus(`Extracted ${diningExportRows.length} ${DINING_CONTENT_TYPE} item(s) from the default language.${fieldNote}`, missingFields.length ? "" : "success");
+    } catch (error) {
+      renderDiningPreview();
+      setDiningStatus(`Unable to extract ${DINING_CONTENT_TYPE}: ${error.message}`, "error");
+    } finally {
+      isDiningLoading = false;
+      $("extractDiningButton").disabled = false;
+      $("extractDiningButton").textContent = "Extract template_dining";
+    }
+  };
+
+  const downloadDiningExcel = () => {
+    if (!diningExportRows.length || !window.XLSX) return;
+    const worksheet = window.XLSX.utils.aoa_to_sheet([DINING_COLUMNS, ...diningExportRows.map((row) => DINING_COLUMNS.map((column) => row[column] ?? ""))]);
+    worksheet["!cols"] = DINING_COLUMNS.map((column) => ({ wch: Math.max(16, Math.min(42, column.length + 4)) }));
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "template_dining");
+    const date = new Date().toISOString().slice(0, 10);
+    window.XLSX.writeFile(workbook, `template_dining_export_${date}.xlsx`);
+  };
+
+  const showTab = (tab) => {
+    $("assetsPanel").hidden = tab !== "assets";
+    $("draftsPanel").hidden = tab !== "drafts";
+    $("diningPanel").hidden = tab !== "dining";
+    $("assetsTab").className = tab === "assets" ? "" : "secondary";
+    $("draftsTab").className = tab === "drafts" ? "" : "secondary";
+    $("diningTab").className = tab === "dining" ? "" : "secondary";
+  };
+
+  $("assetsTab").addEventListener("click", () => showTab("assets"));
+  $("draftsTab").addEventListener("click", () => showTab("drafts"));
+  $("diningTab").addEventListener("click", () => showTab("dining"));
+  $("extractDiningButton").addEventListener("click", extractTemplateDining);
+  $("downloadDiningButton").addEventListener("click", downloadDiningExcel);
   $("loadDraftsButton").addEventListener("click", loadDraftVariants);
   $("draftSearchInput").addEventListener("input", renderDraftRows);
   $("draftSelectVisibleButton").addEventListener("click", () => { draftFilter().forEach((v) => draftSelected.add(v.key)); renderDraftRows(); });
