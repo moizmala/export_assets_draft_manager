@@ -80,6 +80,7 @@
     <div class="toolbar">
       <button id="assetsTab" type="button">Asset Manager</button>
       <button id="draftsTab" type="button" class="secondary">Draft Content Items</button>
+      <button id="diningTab" type="button" class="secondary">Template Dining Export</button>
     </div>
   </section>
 
@@ -157,6 +158,32 @@
         </table>
       </div>
       <div id="draftActionResults" class="status" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div id="diningPanel" hidden>
+    <section class="panel">
+      <div class="toolbar">
+        <div><strong>Template Dining content export</strong><div class="small">Extract the default-language variants for content type <code>template_dining</code>.</div></div>
+        <div class="spacer"></div>
+        <button id="extractDiningButton" type="button">Extract template_dining</button>
+        <button id="downloadDiningButton" class="secondary" type="button" disabled>Download Excel (.xlsx)</button>
+      </div>
+      <div id="diningStatus" class="status" role="status" aria-live="polite">Enter the Environment ID and Management API key above, then extract the template_dining content items.</div>
+      <div class="summary">
+        <span>Exported items: <strong id="diningCount">0</strong></span>
+        <span>Preview: <strong id="diningPreviewCount">0</strong></span>
+      </div>
+      <div class="notice">The export contains one row per content item using its default-language variant. <code>source_id</code> is mapped from the content item's <code>external_id</code>; <code>content_id</code> is mapped from its internal item ID. Element values are matched by their content element codenames. Image fields are exported as asset URLs.</div>
+    </section>
+    <section class="panel">
+      <div class="table-wrap">
+        <table>
+          <thead id="diningHead"></thead>
+          <tbody id="diningRows"><tr><td class="empty">Select Extract template_dining to load the export preview.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="small" style="margin-top:10px">The preview displays up to 25 rows. The Excel file contains every extracted row and all 15 requested columns.</div>
     </section>
   </div>
 </div>
